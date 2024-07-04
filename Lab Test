@@ -1,0 +1,138 @@
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <PubSubClient.h>
+#include <delays.h>
+#include <output.h>
+
+// Pin Definitions
+const int GLED = 18;
+const int YLED = 19;
+const int RLED = 23;
+
+DELAYMS_T d1(500); // 500 ms delay for GLED
+DELAYMS_T d2(2000); // 2000 ms delay for RLED
+
+OUTPUT_T red(RLED, LOW);
+
+// WiFi and MQTT Settings
+const char* ssid = "hamburger";
+const char* password = "zhenyu88";
+const char* mqtt_server = "broker.hivemq.com";
+const char* espClientName = "esp32Client_S10252205";
+const int mqtt_port = 1883;
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+//=================================== Setup ==========================================
+void setup() {
+  Serial.begin(115200);
+  delay(5000);
+
+  pinMode(GLED, OUTPUT);
+  digitalWrite(GLED, LOW);
+
+  pinMode(YLED, OUTPUT);
+  digitalWrite(YLED, LOW);
+
+  setup_wifi();
+  setup_MQTT();
+}
+
+//=================================== Loop ===========================================
+void loop() {
+  if (!client.connected()) {
+    connectMQTT();
+  }
+  client.loop();
+
+  // Toggle GLED every 500ms
+  if (d1.dlyExpiredRestart()) {
+    int adcValue = analogRead(A5);
+    String adcStr = String(adcValue);
+    client.publish("s10252205/room/status/sensor", adcStr.c_str());
+
+    digitalWrite(GLED, !digitalRead(GLED));
+  }
+
+  // Toggle RLED every 2000ms
+  if (d2.dlyExpiredRestart()) {
+    red.toggle();
+  }
+}
+
+//=================================== WiFi Setup =====================================
+void setup_wifi() {
+  delay(10);
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+//=================================== MQTT Setup =====================================
+void setup_MQTT() {
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callback);
+}
+
+//=================================== MQTT Connection ================================
+void connectMQTT() {
+  while (!client.connected()) {
+    Serial.print("Connecting to MQTT...");
+    if (client.connect(espClientName)) {
+      Serial.println("connected");
+      MQTTSubscribe();
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      delay(2000);
+    }
+  }
+}
+
+//=================================== MQTT Subscription ==============================
+void MQTTSubscribe() {
+  client.subscribe("sph2/room/LED");
+  client.subscribe("s10252205/room/cmd/lamp1");
+  client.subscribe("student3/room/LED");
+}
+
+//=================================== MQTT Callback ==================================
+void callback(char* topic, byte* payload, unsigned int length) {
+  String messageTemp;
+  for (unsigned int i = 0; i < length; i++) {
+    messageTemp += (char)payload[i];
+  }
+  Serial.print("Message received in topic: ");
+  Serial.print(topic);
+  Serial.print(" length is: ");
+  Serial.println(length);
+  Serial.print("Data received from broker: ");
+  Serial.println(messageTemp);
+
+  if (String(topic) == "sph2/room/LED") {
+    if (messageTemp == "Off") {
+      digitalWrite(GLED, HIGH);
+    } else if (messageTemp == "On") {
+      digitalWrite(GLED, LOW);
+    }
+  }
+
+  if (String(topic) == "s10252205/room/cmd/lamp1") {
+    if (messageTemp.equalsIgnoreCase("off")) {
+      digitalWrite(YLED, HIGH);
+    } else if (messageTemp.equalsIgnoreCase("on")) {
+      digitalWrite(YLED, LOW);
+    }
+  }
+}
